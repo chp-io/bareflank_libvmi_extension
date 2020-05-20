@@ -12,13 +12,19 @@
 // License along with this library; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-
-
+#ifdef ENABLE_BOXY
+#include <bfvmm/vcpu/vcpu_factory.h>
+#include <boxy/hve/arch/intel_x64/vcpu.h>
+#else
 #include <hve/arch/intel_x64/vcpu.h>
+#endif
+
 #include <bfdebug.h>
 #include <bfcallonce.h>
+
 #include <string>
 #include <sstream>
+
 #include "json.hpp"
 
 using namespace bfvmm::intel_x64;
@@ -180,3 +186,98 @@ void vcpu_init_nonroot(vcpu_t *vcpu)
     vcpu->add_exit_handler_for_reason(basic_exit_reason::vmcall, vmcall_handler);
     vcpu->add_exit_handler_for_reason(basic_exit_reason::cpuid, cpuid_magic);
 }
+
+#ifdef ENABLE_BOXY
+
+// -----------------------------------------------------------------------------
+// vCPU
+// -----------------------------------------------------------------------------
+
+namespace vmi
+{
+
+class vcpu : public boxy::intel_x64::vcpu
+{
+public:
+    /// Default Constructor
+    ///
+    explicit vcpu(vcpuid::type id, gsl::not_null<boxy::intel_x64::domain *> domain)
+        : boxy::intel_x64::vcpu{id, domain}
+    {
+        bfdebug_info(0, "Boxy vCPU is now extended by libvmi");
+    }
+
+    ~vcpu() override = default;
+
+public:
+    vcpu(vcpu &&) = delete;
+    vcpu &operator=(vcpu &&) = delete;
+
+    vcpu(const vcpu &) = delete;
+    vcpu &operator=(const vcpu &) = delete;
+};
+
+}
+
+// -----------------------------------------------------------------------------
+// vCPU Factory
+// -----------------------------------------------------------------------------
+
+namespace bfvmm
+{
+
+std::unique_ptr<vcpu>
+vcpu_factory::make(vcpuid::type vcpuid, void *data)
+{
+    using namespace boxy::intel_x64;
+    static domain dom0{0};
+
+    if (vcpuid::is_host_vcpu(vcpuid)) {
+        return std::make_unique<vmi::vcpu>(vcpuid, &dom0);
+    }
+    else {
+        return std::make_unique<vmi::vcpu>(vcpuid, static_cast<domain *>(data));
+    }
+}
+
+}
+
+// -----------------------------------------------------------------------------
+// Domain
+// -----------------------------------------------------------------------------
+
+namespace vmi
+{
+
+class domain : public boxy::intel_x64::domain
+{
+public:
+    /// Default Constructor
+    ///
+    explicit domain(domainid_type domainid) : boxy::intel_x64::domain{domainid}
+    {
+        bfdebug_info(0, "Boxy domain is now extended by libvmi");
+    }
+
+    ~domain() override = default;
+};
+
+}
+
+// -----------------------------------------------------------------------------
+// Domain Factory
+// -----------------------------------------------------------------------------
+
+namespace boxy
+{
+
+std::unique_ptr<domain>
+domain_factory::make(domain::domainid_type domainid, void *data)
+{
+    bfignored(data);
+    return std::make_unique<vmi::domain>(domainid);
+}
+
+}
+
+#endif
